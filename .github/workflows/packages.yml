@@ -166,3 +166,70 @@ jobs:
         with:
           name: '${{ matrix.distro.name }}-${{ matrix.distro.release }}-packages'
           path: rpm-icinga2/build
+  raspbian:
+    name: Raspbian
+
+    strategy:
+      matrix:
+        codename:
+          - buster
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout HEAD
+        uses: actions/checkout@v1
+
+      - name: qemu-user-static
+        run: |
+          set -exo pipefail
+          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y qemu-user-static
+
+      - name: raspbian-icinga2
+        run: |
+          set -exo pipefail
+          git clone https://git.icinga.com/packaging/raspbian-icinga2.git
+          chmod o+w raspbian-icinga2
+
+      - name: Restore/backup ccache
+        id: ccache
+        uses: actions/cache@v1
+        with:
+          path: raspbian-icinga2/ccache
+          key: 'raspbian/${{ matrix.codename }}-ccache'
+
+      - name: Binary
+        run: |
+          set -exo pipefail
+          git checkout -B master
+          if [ -e raspbian-icinga2/ccache ]; then
+            chmod -R o+w raspbian-icinga2/ccache
+          fi
+          docker run --rm \
+            -v "$(pwd)/raspbian-icinga2:/raspbian-icinga2" \
+            -v "$(pwd)/.git:/icinga2.git:ro" \
+            -w /raspbian-icinga2 \
+            -e ICINGA_BUILD_PROJECT=icinga2 \
+            -e ICINGA_BUILD_TYPE=snapshot \
+            -e UPSTREAM_GIT_URL=file:///icinga2.git \
+            -e ICINGA_BUILD_DEB_DEFAULT_ARCH=armhf \
+            registry.icinga.com/build-docker/raspbian/${{ matrix.codename }} \
+            icinga-build-package
+
+      - name: Test
+        run: |
+          set -exo pipefail
+          docker run --rm \
+            -v "$(pwd)/raspbian-icinga2:/raspbian-icinga2" \
+            -w /raspbian-icinga2 \
+            -e ICINGA_BUILD_PROJECT=icinga2 \
+            -e ICINGA_BUILD_TYPE=snapshot \
+            -e ICINGA_BUILD_DEB_DEFAULT_ARCH=armhf \
+            registry.icinga.com/build-docker/raspbian/${{ matrix.codename }} \
+            icinga-build-test
+
+      - name: Artifacts
+        uses: actions/upload-artifact@v1
+        with:
+          name: 'raspbian-${{ matrix.codename }}-packages'
+          path: raspbian-icinga2/build
